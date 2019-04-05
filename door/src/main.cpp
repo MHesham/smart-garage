@@ -1,4 +1,6 @@
+#include <ArduinoOTA.h>
 #include <ESP8266WiFi.h>
+#include <ESP8266mDNS.h>
 #include <FS.h>
 #include <PubSubClient.h>
 #include <WiFiClient.h>
@@ -129,6 +131,7 @@ bool loadConfig() {
 }
 
 void connectWiFi() {
+  WiFi.hostname(NODE_HOSTNAME);
   WiFi.mode(WIFI_STA);
   WiFi.begin(connConfig.ssid, connConfig.wifiPassword);
   Serial.print(F("SSID="));
@@ -139,7 +142,8 @@ void connectWiFi() {
     Serial.print(".");
   }
   Serial.println(F("[done]"));
-  WiFi.printDiag(Serial);
+  Serial.print("IP: ");
+  Serial.println(WiFi.localIP());
 }
 
 void on_handler() { Serial.println("Door ON"); }
@@ -163,17 +167,14 @@ void printTime() {
   gmtime_r(&now, &timeinfo);
   Serial.print(F("GMT time: "));
   Serial.print(asctime(&timeinfo));
-
 }
 void connectMqtt() {
   if (!mqttClient.connected()) {
     printTime();
-    Serial.print(F("connecting to MQTT broker ..."));
-    String clientId(connConfig.mqttClientId);
-    clientId += String(random(0xffff), HEX);
+    Serial.print(F("connecting to MQTT broker "));
     bool connected;
 #if MQTT_SECURE
-    connected = mqttClient.connect(clientId.c_str(), connConfig.mqttUser,
+    connected = mqttClient.connect(NODE_HOSTNAME, connConfig.mqttUser,
                                    connConfig.mqttPassword);
 #else
     connected = mqttClient.connect(clientId.c_str());
@@ -206,14 +207,37 @@ void connectMqtt() {
 void setClock() {
   configTime(0, 0, "pool.ntp.org", "time.nist.gov");
 
-  Serial.print(F("Waiting for NTP time sync: "));
+  Serial.print(F("Waiting for NTP time sync "));
   time_t now = time(nullptr);
   while (now < 8 * 3600 * 2) {
     delay(500);
     Serial.print(".");
     now = time(nullptr);
   }
-  Serial.println("");
+  Serial.println("[done]");
+}
+
+void setupOTA() {
+  ArduinoOTA.onStart([]() { Serial.println(F("OTA Start")); });
+  ArduinoOTA.onEnd([]() { Serial.println(F("\nOTA End")); });
+  ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
+    Serial.printf("Progress: %u%%\r", (progress / (total / 100)));
+  });
+  ArduinoOTA.onError([](ota_error_t error) {
+    Serial.printf("Error[%u]: ", error);
+    if (error == OTA_AUTH_ERROR)
+      Serial.println("Auth Failed");
+    else if (error == OTA_BEGIN_ERROR)
+      Serial.println("Begin Failed");
+    else if (error == OTA_CONNECT_ERROR)
+      Serial.println("Connect Failed");
+    else if (error == OTA_RECEIVE_ERROR)
+      Serial.println("Receive Failed");
+    else if (error == OTA_END_ERROR)
+      Serial.println("End Failed");
+  });
+  ArduinoOTA.setHostname(NODE_HOSTNAME);
+  ArduinoOTA.begin(true);
 }
 
 void setup(void) {
@@ -229,11 +253,11 @@ void setup(void) {
     for (;;) {
     }
   }
-
   connectWiFi();
   setClock();
-
   randomSeed(micros());
+  setupOTA();
+
 #if MQTT_SECURE
   wifiClient.setTrustAnchors(&caCert);
 #endif
@@ -242,6 +266,7 @@ void setup(void) {
 }
 
 void loop(void) {
+  ArduinoOTA.handle();
   if (!mqttClient.connected()) {
     digitalWrite(LED_BUILTIN, HIGH);
     connectMqtt();

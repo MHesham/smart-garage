@@ -6,6 +6,7 @@
 #define CA_CERT_FILENAME "/ca.crt.pem"
 #define MQTT_CONFIG_FILENAME "/mqtt.config"
 #define WIFI_CONFIG_FILENAME "/wifi.config"
+#define NODE_HOSTNAME "garage-door"
 
 struct ConnectionConfig {
   char ssid[16];
