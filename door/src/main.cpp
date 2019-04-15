@@ -13,7 +13,7 @@ using namespace smartgarage;
 
 class GarageDoor : public Esp8266Node {
  public:
-  static constexpr uint8_t sonarPulsePin = 5;
+  static constexpr uint8_t sonarPulsePin = 9;
   static constexpr uint32_t samplingRatePeriodMs = 1000;
 
   GarageDoor() : lastUpdateMs(0) {}
@@ -44,7 +44,7 @@ class GarageDoor : public Esp8266Node {
   void sampleSonar() {
     uint32_t pwUs = pulseIn(sonarPulsePin, HIGH);
     uint32_t pwIn = pwUs / 147;
-    Serial.print(F("PW (in): "));
+    Serial.print(F("Sonar (in): "));
     Serial.println(pwIn);
     String pwInStr = String(pwIn, 10);
     if (!getMqttClient().publish(TOPIC_GARAGE_SONAR_DISTANCE_IN, pwInStr.c_str())) {

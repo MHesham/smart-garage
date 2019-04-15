@@ -13,7 +13,7 @@ using namespace smartgarage;
 Esp8266Node::Esp8266Node() : mqttClient(wifiClient), registryHead(nullptr) {}
 
 void Esp8266Node::setup() {
-  Serial.begin(74880);
+  Serial.begin(115200);
   while (!Serial) {
   }
 
@@ -76,6 +76,7 @@ void Esp8266Node::setupOTA() {
   });
   ArduinoOTA.setHostname(config.hostname);
   ArduinoOTA.setPasswordHash(config.otaPasswordMd5Hash);
+  ArduinoOTA.setPort(config.otaPort);
   ArduinoOTA.begin(true);
 }
 
