@@ -8,7 +8,7 @@
 #include <WiFiClient.h>
 #include <time.h>
 
-using namespace smartgarage;
+using namespace espnode;
 
 Esp8266Node::Esp8266Node() : mqttClient(wifiClient), registryHead(nullptr) {}
 
@@ -33,12 +33,12 @@ void Esp8266Node::setup() {
   Serial.println(F(" starting"));
 }
 
-void Esp8266Node::printTime() {
+void Esp8266Node::logTime() {
   tm timeinfo;
   time_t now = time(nullptr);
   gmtime_r(&now, &timeinfo);
-  Serial.print(F("GMT time: "));
-  Serial.print(asctime(&timeinfo));
+  char timeBuff[32];
+  LOG("GMT time: %s", asctime_r(&timeinfo, timeBuff));
 }
 
 // Set time via NTP, as required for x.509 validation
@@ -223,22 +223,17 @@ void Esp8266Node::connectWiFi() {
 
 void Esp8266Node::connectMqtt() {
   if (!mqttClient.connected()) {
-    printTime();
-    Serial.print(F("connecting to MQTT broker "));
     bool connected;
     connected = mqttClient.connect(config.hostname, config.mqttUser,
                                    config.mqttPassword);
     if (connected) {
-      Serial.println(F("[done]"));
+      LOG("connected to MQTT broker");
       onMqttConnect();
     } else {
-      Serial.println(F("[failed]"));
-      Serial.print(F("MQTT error:"));
-      Serial.print(mqttClient.state());
-      char buff[128];
-      wifiClient.getLastSSLError(buff, sizeof(buff));
-      Serial.print(F(", SSL error: "));
-      Serial.println(buff);
+      char sslBuff[128];
+      wifiClient.getLastSSLError(sslBuff, sizeof(sslBuff));
+      LOG("connecting to MQTT broker failed. MQTT error=%d SSL error='%s'",
+          mqttClient.state(), sslBuff);
     }
   }
 }
@@ -259,16 +254,14 @@ void Esp8266Node::mqttCallback(char *topic, uint8_t *payload,
     }
     curr = curr->next;
   }
-  Serial.print(F("Unknown topic "));
-  Serial.println(topic);
+  LOG("Received unknown topic %s", topic);
 }
 
 void Esp8266Node::onMqttConnect() {
   TopicRegistryNode *curr = registryHead;
   while (curr) {
     mqttClient.subscribe(curr->topic.c_str());
-    Serial.print(F("subscribing to "));
-    Serial.println(curr->topic);
+    LOG("subscribing to %s", curr->topic.c_str());
     curr = curr->next;
   }
 }

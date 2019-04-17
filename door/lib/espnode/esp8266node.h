@@ -6,11 +6,17 @@
 #include <stdint.h>
 #include <functional>
 
-namespace smartgarage {
+namespace espnode {
 
 #define CA_CERT_FILENAME "/ca.crt.pem"
 #define MQTT_CONFIG_FILENAME "/mqtt.config"
 #define WIFI_CONFIG_FILENAME "/wifi.config"
+#define TOPIC_LOG_POSTFIX "/log"
+
+
+#define LOG_FMT_HELPER(FMT, ...) PSTR(FMT), __VA_ARGS__
+
+#define LOG(...) log_P(LOG_FMT_HELPER(__VA_ARGS__, ""))
 
 struct ConnectionConfig {
   char ssid[16];
@@ -30,13 +36,12 @@ class Esp8266Node {
   virtual ~Esp8266Node() {}
   virtual void setup();
   virtual void loop();
-  void fail() {}
   void mqttCallback(char *topic, uint8_t *payload, unsigned int length);
-  static void printTime();
 
   typedef std::function<void(uint8_t *, unsigned int)> TopicHandler;
 
  protected:
+  void fail() {}
   void onMqttConnect();
   void connectWiFi();
   void connectMqtt();
@@ -44,6 +49,17 @@ class Esp8266Node {
   void setupOTA();
   void subscribe(const String &topic, TopicHandler handler);
   PubSubClient &getMqttClient() { return mqttClient; }
+
+  template<class... T>
+  void log_P(const char *fmtP, T... args) {
+    char buffer[64];
+    sprintf_P(buffer, fmtP, args...);
+    Serial.println(buffer);
+    if (mqttClient.connected()) {
+      mqttClient.publish(TOPIC_LOG_POSTFIX, buffer, false);
+    }
+  }
+  void logTime();
 
  private:
   void setClock();
