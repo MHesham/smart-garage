@@ -1,0 +1,11 @@
+{
+    "ssid" : "SSID",
+    "wifiPassword" : "WIFIPASSWORD",
+    "hostname" : "HOSTNAME",
+    "otaPort" : 12345,
+    "otaPasswordMd5Hash" : "OTAPASSWORDMD5HASH",
+    "mqttBrokerHostname" : "MQTTBROKERHOSTNAME",
+    "mqttPort" : 12345,
+    "mqttUser" : "MQTTUSER",
+    "mqttPassword" : "MQTTPASSWORD"
+}

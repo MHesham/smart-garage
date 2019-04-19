@@ -1,9 +1,19 @@
 #pragma once
 
-#include <cstdint>
 #include <cstddef>
+#include <cstdint>
 
 namespace espnode {
+
+template <size_t MAX_SZ = 32>
+static inline String payload_to_str(uint8_t* payload, size_t length) {
+  static_assert(MAX_SZ > 0, "invalid max size");
+  char buff[MAX_SZ];
+  size_t sz = std::min(MAX_SZ - 1, length);
+  strncpy(buff, reinterpret_cast<char*>(payload), sz);
+  buff[MAX_SZ - 1] = 0;
+  return String(buff);
+}
 
 class Rate {
  public:
@@ -55,4 +65,30 @@ class MedianFilter1D {
   std::array<T, SIZE> window;
 };
 
-}
+template <int THRESHOLD, size_t WINDOW_SIZE>
+class TransientEvent {
+ public:
+  static_assert(THRESHOLD <= WINDOW_SIZE, "threshold out of bounds");
+  TransientEvent() : nextInOut(0), count(0) {
+    std::fill(window.begin(), window.end(), false);
+  }
+  void sample(bool state) {
+    if (window[nextInOut]) {
+      count--;
+    }
+    if (state) {
+      count++;
+    }
+    window[nextInOut] = state;
+    nextInOut = (nextInOut + 1) % WINDOW_SIZE;
+  }
+
+  bool isTriggered() const { return count >= THRESHOLD; }
+
+ private:
+  size_t nextInOut;
+  std::array<bool, WINDOW_SIZE> window;
+  int count;
+};
+
+}  // namespace espnode

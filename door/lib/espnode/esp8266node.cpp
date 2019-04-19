@@ -1,5 +1,6 @@
 #include "esp8266node.h"
 
+#include <ArduinoJson.h>
 #include <ArduinoOTA.h>
 #include <ESP8266WiFi.h>
 #include <ESP8266mDNS.h>
@@ -91,18 +92,12 @@ void Esp8266Node::loop() {
   }
 }
 
-void Esp8266Node::loadConfigfromSpiffs() {
+void Esp8266Node::loadDataFromFlash() {
   if (!SPIFFS.begin()) {
     Serial.println(F("SPIFFS init failed"));
     fail();
   }
 
-  Dir dir = SPIFFS.openDir("/");
-  while (dir.next()) {
-    Serial.print(dir.fileName());
-    Serial.print("\t");
-    Serial.println(dir.fileSize());
-  }
   {
     if (!SPIFFS.exists(CA_CERT_FILENAME)) {
       Serial.println(F(CA_CERT_FILENAME " doesn't exist"));
@@ -122,75 +117,42 @@ void Esp8266Node::loadConfigfromSpiffs() {
     file.close();
   }
 
-  memset(&config, 0, sizeof(config));
-
-  {
-    if (!SPIFFS.exists(WIFI_CONFIG_FILENAME)) {
-      Serial.println(WIFI_CONFIG_FILENAME " doesn't exist");
-      fail();
-    }
-    File file = SPIFFS.open(WIFI_CONFIG_FILENAME, "r");
-    if (!file) {
-      Serial.println(WIFI_CONFIG_FILENAME " open failed");
-      fail();
-    }
-    {
-      String str = file.readStringUntil('\n');
-      strlcpy(config.ssid, str.c_str(), sizeof(config.ssid));
-    }
-    {
-      String str = file.readStringUntil('\n');
-      strlcpy(config.wifiPassword, str.c_str(), sizeof(config.wifiPassword));
-    }
-    {
-      String str = file.readStringUntil('\n');
-      strlcpy(config.hostname, str.c_str(), sizeof(config.hostname));
-    }
-    {
-      String str = file.readStringUntil('\n');
-      config.otaPort = static_cast<uint16_t>(str.toInt());
-    }
-    {
-      String str = file.readStringUntil('\n');
-      strlcpy(config.otaPasswordMd5Hash, str.c_str(),
-              sizeof(config.otaPasswordMd5Hash));
-    }
+  if (!SPIFFS.exists(CONFIG_FILENAME)) {
+    Serial.println(F(CONFIG_FILENAME " doesn't exist"));
+    fail();
+  }
+  File file = SPIFFS.open(CONFIG_FILENAME, "r");
+  if (!file) {
+    Serial.println(F(CONFIG_FILENAME " open failed"));
+    fail();
   }
 
-  {
-    if (!SPIFFS.exists(MQTT_CONFIG_FILENAME)) {
-      Serial.println(F(MQTT_CONFIG_FILENAME " doesn't exist"));
-      fail();
-    }
-    File file = SPIFFS.open(MQTT_CONFIG_FILENAME, "r");
-    if (!file) {
-      Serial.println(F(MQTT_CONFIG_FILENAME "open failed"));
-      fail();
-    }
-    {
-      String str = file.readStringUntil('\n');
-      strlcpy(config.mqttBrokerHostname, str.c_str(),
-              sizeof(config.mqttBrokerHostname));
-    }
-    {
-      String str = file.readStringUntil('\n');
-      config.mqttPort = static_cast<uint16_t>(str.toInt());
-    }
-    {
-      String str = file.readStringUntil('\n');
-      strlcpy(config.mqttUser, str.c_str(), sizeof(config.mqttUser));
-    }
-    {
-      String str = file.readStringUntil('\n');
-      strlcpy(config.mqttPassword, str.c_str(), sizeof(config.mqttPassword));
-    }
+  StaticJsonDocument<512> doc;
+  DeserializationError error = deserializeJson(doc, file);
+  if (error) {
+    Serial.println(F("Failed to deserialize json file"));
+    fail();
   }
+
+  strlcpy(config.hostname, doc["hostname"], sizeof(config.hostname));
+  strlcpy(config.mqttBrokerHostname, doc["mqttBrokerHostname"],
+          sizeof(config.mqttBrokerHostname));
+  strlcpy(config.mqttPassword, doc["mqttPassword"],
+          sizeof(config.mqttPassword));
+  config.mqttPort = doc["mqttPort"].as<uint16_t>();
+  strlcpy(config.mqttUser, doc["mqttUser"], sizeof(config.mqttUser));
+  strlcpy(config.otaPasswordMd5Hash, doc["otaPasswordMd5Hash"],
+          sizeof(config.otaPasswordMd5Hash));
+  config.otaPort = doc["otaPort"].as<uint16_t>();
+  strlcpy(config.ssid, doc["ssid"], sizeof(config.ssid));
+  strlcpy(config.wifiPassword, doc["wifiPassword"],
+          sizeof(config.wifiPassword));
 
   SPIFFS.end();
 }
 
 void Esp8266Node::loadConfig() {
-  loadConfigfromSpiffs();
+  loadDataFromFlash();
   Serial.println(F("config received:"));
   Serial.println(F("WiFi config:"));
   Serial.println(config.ssid);
@@ -203,6 +165,8 @@ void Esp8266Node::loadConfig() {
   Serial.println(config.mqttPort);
   Serial.println(config.mqttUser);
   Serial.println(config.mqttPassword);
+
+  sprintf_P(logTopic, PSTR("/%s/log"), config.hostname);
 }
 
 void Esp8266Node::connectWiFi() {
@@ -263,5 +227,12 @@ void Esp8266Node::onMqttConnect() {
     mqttClient.subscribe(curr->topic.c_str());
     LOG("subscribing to %s", curr->topic.c_str());
     curr = curr->next;
+  }
+}
+
+void Esp8266Node::fail() {
+  Serial.println(F("Critical Failure"));
+  // Let the watchdog reset the board
+  for (;;) {
   }
 }
