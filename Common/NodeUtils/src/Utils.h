@@ -9,9 +9,9 @@ template <size_t MAX_SZ = 32>
 static inline String payload_to_str(uint8_t* payload, size_t length) {
   static_assert(MAX_SZ > 0, "invalid max size");
   char buff[MAX_SZ];
-  size_t sz = std::min(MAX_SZ - 1, length);
-  strncpy(buff, reinterpret_cast<char*>(payload), sz);
-  buff[MAX_SZ - 1] = 0;
+  size_t len = std::min(MAX_SZ - 1, length);
+  strncpy(buff, reinterpret_cast<char*>(payload), len);
+  buff[len] = 0;
   return String(buff);
 }
 
@@ -69,26 +69,34 @@ template <int THRESHOLD, size_t WINDOW_SIZE>
 class TransientEvent {
  public:
   static_assert(THRESHOLD <= WINDOW_SIZE, "threshold out of bounds");
-  TransientEvent() : nextInOut(0), count(0) {
+  TransientEvent() : nextIn(0), nextOut(0), count(0), total_count(0) {
     std::fill(window.begin(), window.end(), false);
   }
   void sample(bool state) {
-    if (window[nextInOut]) {
-      count--;
+    // evict oldest event in the window when the window is full
+    if (total_count == WINDOW_SIZE) {
+      if (window[nextOut]) {
+        count--;
+      }
+      nextOut = (nextOut + 1) % WINDOW_SIZE;
+      total_count--;
     }
     if (state) {
       count++;
     }
-    window[nextInOut] = state;
-    nextInOut = (nextInOut + 1) % WINDOW_SIZE;
+    window[nextIn] = state;
+    nextIn = (nextIn + 1) % WINDOW_SIZE;
+    total_count++;
   }
 
   bool isTriggered() const { return count >= THRESHOLD; }
 
  private:
-  size_t nextInOut;
+  size_t nextIn;
+  size_t nextOut;
   std::array<bool, WINDOW_SIZE> window;
   int count;
+  int total_count;
 };
 
 }  // namespace espnode

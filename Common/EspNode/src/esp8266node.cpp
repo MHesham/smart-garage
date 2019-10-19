@@ -8,15 +8,18 @@
 #include <PubSubClient.h>
 #include <WiFiClient.h>
 #include <time.h>
+#include <cstdarg>
 
 using namespace espnode;
 
-Esp8266Node::Esp8266Node() : mqttClient(wifiClient), registryHead(nullptr) {}
+Esp8266Node::Esp8266Node()
+    : mqttClient(wifiClient), registryHead(nullptr) {}
 
-void Esp8266Node::setup() {
+void Esp8266Node::init() {
   Serial.begin(115200);
   while (!Serial) {
   }
+  Serial.flush();
 
   loadConfig();
   connectWiFi();
@@ -25,13 +28,49 @@ void Esp8266Node::setup() {
   setupOTA();
 
   wifiClient.setTrustAnchors(&caCert);
-  mqttClient.setServer(config.mqttBrokerHostname, config.mqttPort);
-  mqttClient.setCallback(
+  getMqttClient().setServer(config.mqttBrokerHostname, config.mqttPort);
+  getMqttClient().setCallback(
       [this](char *topic, uint8_t *payload, unsigned int length) {
         this->mqttCallback(topic, payload, length);
       });
   Serial.print(config.hostname);
-  Serial.println(F(" starting"));
+  Serial.println(F(" node starting"));
+}
+
+void Esp8266Node::runCycle() {
+  ArduinoOTA.handle();
+  if (!getMqttClient().connected()) {
+    connectMqtt();
+  }
+  if (getMqttClient().connected()) {
+    getMqttClient().loop();
+  }
+}
+
+void Esp8266Node::log_P(PGM_P formatP, ...) {
+  va_list vl;
+  static char buffer[96];
+  va_start(vl, formatP);
+  vsnprintf_P(buffer, sizeof(buffer), formatP, vl);
+  buffer[sizeof(buffer) - 1] = '\0';
+  va_end(vl);
+  Serial.println(buffer);
+  Serial.flush();
+  if (getMqttClient().connected()) {
+    getMqttClient().publish(logTopic, buffer);
+  }
+}
+
+void Esp8266Node::subscribe(const String &topic, TopicHandler handler) {
+  TopicRegistryNode *newReg = new TopicRegistryNode(topic, handler);
+  newReg->next = registryHead;
+  registryHead = newReg;
+}
+
+void Esp8266Node::publish(const String &topic, const String &value) {
+  if (!getMqttClient().publish(topic.c_str(), value.c_str())) {
+    Serial.printf_P(PSTR("Failed to publish %s"), topic.c_str());
+  }
 }
 
 void Esp8266Node::logTime() {
@@ -39,7 +78,7 @@ void Esp8266Node::logTime() {
   time_t now = time(nullptr);
   gmtime_r(&now, &timeinfo);
   char timeBuff[32];
-  LOG("GMT time: %s", asctime_r(&timeinfo, timeBuff));
+  log_P(PSTR("GMT time: %s"), asctime_r(&timeinfo, timeBuff));
 }
 
 // Set time via NTP, as required for x.509 validation
@@ -50,46 +89,35 @@ void Esp8266Node::setClock() {
   time_t now = time(nullptr);
   while (now < 8 * 3600 * 2) {
     delay(500);
-    Serial.print(".");
+    Serial.print(F("."));
     now = time(nullptr);
   }
-  Serial.println("[done]");
+  Serial.println(F("[done]"));
 }
 
 void Esp8266Node::setupOTA() {
   ArduinoOTA.onStart([]() { Serial.println(F("OTA Start")); });
   ArduinoOTA.onEnd([]() { Serial.println(F("\nOTA End")); });
   ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
-    Serial.printf("Progress: %u%%\r", (progress / (total / 100)));
+    Serial.printf_P(PSTR("Progress: %u%%\r"), (progress / (total / 100)));
   });
   ArduinoOTA.onError([](ota_error_t error) {
-    Serial.printf("Error[%u]: ", error);
+    Serial.printf_P(PSTR("Error[%u]: "), error);
     if (error == OTA_AUTH_ERROR)
-      Serial.println("Auth Failed");
+      Serial.println(F("Auth Failed"));
     else if (error == OTA_BEGIN_ERROR)
-      Serial.println("Begin Failed");
+      Serial.println(F("Begin Failed"));
     else if (error == OTA_CONNECT_ERROR)
-      Serial.println("Connect Failed");
+      Serial.println(F("Connect Failed"));
     else if (error == OTA_RECEIVE_ERROR)
-      Serial.println("Receive Failed");
+      Serial.println(F("Receive Failed"));
     else if (error == OTA_END_ERROR)
-      Serial.println("End Failed");
+      Serial.println(F("End Failed"));
   });
   ArduinoOTA.setHostname(config.hostname);
   ArduinoOTA.setPasswordHash(config.otaPasswordMd5Hash);
   ArduinoOTA.setPort(config.otaPort);
   ArduinoOTA.begin(true);
-}
-
-void Esp8266Node::loop() {
-  ArduinoOTA.handle();
-  if (!mqttClient.connected()) {
-    connectMqtt();
-  }
-
-  if (mqttClient.connected()) {
-    mqttClient.loop();
-  }
 }
 
 void Esp8266Node::loadDataFromFlash() {
@@ -127,7 +155,7 @@ void Esp8266Node::loadDataFromFlash() {
     fail();
   }
 
-  StaticJsonDocument<512> doc;
+  static StaticJsonDocument<512> doc;
   DeserializationError error = deserializeJson(doc, file);
   if (error) {
     Serial.println(F("Failed to deserialize json file"));
@@ -166,7 +194,7 @@ void Esp8266Node::loadConfig() {
   Serial.println(config.mqttUser);
   Serial.println(config.mqttPassword);
 
-  sprintf_P(logTopic, PSTR("/%s/log"), config.hostname);
+  sprintf_P(logTopic, PSTR("%s/log"), config.hostname);
 }
 
 void Esp8266Node::connectWiFi() {
@@ -181,31 +209,28 @@ void Esp8266Node::connectWiFi() {
     Serial.print(".");
   }
   Serial.println(F("[done]"));
-  Serial.print("IP: ");
+  Serial.print(F("IP: "));
   Serial.println(WiFi.localIP());
 }
 
 void Esp8266Node::connectMqtt() {
-  if (!mqttClient.connected()) {
+  if (!getMqttClient().connected()) {
+    Serial.printf_P(PSTR("connecting to MQTT broker..."));
+    Serial.flush();
     bool connected;
-    connected = mqttClient.connect(config.hostname, config.mqttUser,
-                                   config.mqttPassword);
+    connected = getMqttClient().connect(config.hostname, config.mqttUser,
+                                        config.mqttPassword);
     if (connected) {
-      LOG("connected to MQTT broker");
+      log_P(PSTR("connected to MQTT broker"));
       onMqttConnect();
     } else {
       char sslBuff[128];
       wifiClient.getLastSSLError(sslBuff, sizeof(sslBuff));
-      LOG("connecting to MQTT broker failed. MQTT error=%d SSL error='%s'",
-          mqttClient.state(), sslBuff);
+      log_P(PSTR("connecting to MQTT broker failed. MQTT error=%d SSL "
+                 "error='%s'"),
+            getMqttClient().state(), sslBuff);
     }
   }
-}
-
-void Esp8266Node::subscribe(const String &topic, TopicHandler handler) {
-  TopicRegistryNode *newReg = new TopicRegistryNode(topic, handler);
-  newReg->next = registryHead;
-  registryHead = newReg;
 }
 
 void Esp8266Node::mqttCallback(char *topic, uint8_t *payload,
@@ -218,20 +243,20 @@ void Esp8266Node::mqttCallback(char *topic, uint8_t *payload,
     }
     curr = curr->next;
   }
-  LOG("Received unknown topic %s", topic);
+  log_P(PSTR("Received unknown topic %s"), topic);
 }
 
 void Esp8266Node::onMqttConnect() {
   TopicRegistryNode *curr = registryHead;
   while (curr) {
-    mqttClient.subscribe(curr->topic.c_str());
-    LOG("subscribing to %s", curr->topic.c_str());
+    log_P(PSTR("subscribing to %s"), curr->topic.c_str());
+    getMqttClient().subscribe(curr->topic.c_str());
     curr = curr->next;
   }
 }
 
 void Esp8266Node::fail() {
-  Serial.println(F("Critical Failure"));
+  Serial.println(F("!!Critical Failure!!"));
   // Let the watchdog reset the board
   for (;;) {
   }

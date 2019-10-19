@@ -13,10 +13,6 @@ namespace espnode {
 #define WIFI_CONFIG_FILENAME "/wifi.config"
 #define CONFIG_FILENAME "/config.json"
 
-#define LOG_FMT_HELPER(FMT, ...) PSTR(FMT), __VA_ARGS__
-
-#define LOG(...) log_P(LOG_FMT_HELPER(__VA_ARGS__, ""))
-
 struct NodeConfig {
   char ssid[16];
   char wifiPassword[16];
@@ -29,32 +25,48 @@ struct NodeConfig {
   char mqttPassword[16];
 };
 
-class Esp8266Node {
+class Task {
+ public:
+  virtual ~Task() {}
+  virtual void init() = 0;
+  virtual void runCycle() = 0;
+};
+
+class ConnectedNode {
+ public:
+  typedef std::function<void(uint8_t *, unsigned int)> TopicHandler;
+  virtual ~ConnectedNode() {}
+
+  virtual void subscribe(const String &topic, TopicHandler handler) = 0;
+  virtual void publish(const String &topic, const String &value) = 0;
+  virtual void log_P(PGM_P formatP, ...)
+      __attribute__((format(printf, 2, 3))) = 0;
+};
+
+class NodeTask : public Task {
+ public:
+  NodeTask(ConnectedNode &node) : node(node) {}
+  ConnectedNode &getNode() { return node; }
+
+ private:
+  ConnectedNode &node;
+};
+
+class Esp8266Node : public ConnectedNode, public Task {
  public:
   Esp8266Node();
-  virtual ~Esp8266Node() {}
-  virtual void setup();
-  virtual void loop();
+  virtual void init() override;
+  virtual void runCycle() override;
+  void subscribe(const String &topic, TopicHandler handler) override;
+  void publish(const String &topic, const String &value) override;
+  void log_P(PGM_P formatP, ...) override __attribute__((format(printf, 2, 3)));
   void mqttCallback(char *topic, uint8_t *payload, unsigned int length);
-
-  typedef std::function<void(uint8_t *, unsigned int)> TopicHandler;
 
  protected:
   void fail();
   void onMqttConnect();
-  void subscribe(const String &topic, TopicHandler handler);
-  PubSubClient &getMqttClient() { return mqttClient; }
-
-  template <class... T>
-  void log_P(const char *fmtP, T... args) {
-    char buffer[64];
-    sprintf_P(buffer, fmtP, args...);
-    Serial.println(buffer);
-    if (mqttClient.connected()) {
-      mqttClient.publish(logTopic, buffer, false);
-    }
-  }
   void logTime();
+  PubSubClient &getMqttClient() { return mqttClient; }
 
  private:
   void connectWiFi();
@@ -71,9 +83,9 @@ class Esp8266Node {
     TopicRegistryNode *next;
   };
 
+  PubSubClient mqttClient;
   BearSSL::WiFiClientSecure wifiClient;
   BearSSL::X509List caCert;
-  PubSubClient mqttClient;
   NodeConfig config;
   TopicRegistryNode *registryHead;
   char logTopic[32];
